@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -119,6 +119,19 @@ export default function PredictionPage({ onBack }: { onBack: () => void }) {
     const sum = examImages.reduce((acc, img) => acc + img.confidence, 0)
     return Math.round(sum / examImages.length)
   }, [classificationResults])
+
+  // Evitar scroll da página quando o modal está aberto
+  useEffect(() => {
+    if (selectedImage !== null) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [selectedImage])
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -284,7 +297,7 @@ export default function PredictionPage({ onBack }: { onBack: () => void }) {
       {selectedImage !== null && selectedImg && (
         <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-8" onClick={handleCloseModal}>
           <div
-            className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            className="bg-white rounded-xl shadow-2xl w-[min(90vw,90vh)] h-[min(90vw,90vh)] overflow-hidden flex flex-col"
             onClick={e => e.stopPropagation()}
           >
             {/* Header com info */}
