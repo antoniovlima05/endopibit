@@ -10,13 +10,8 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState<"signup" | "login" | "dashboard" | "prediction">("login")
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null)
 
-  const handleSignUp = () => {
-    setCurrentPage("login")
-  }
-
-  const handleLogin = () => {
-    setCurrentPage("dashboard")
-  }
+  const handleSignUp = () => setCurrentPage("login")
+  const handleLogin = () => setCurrentPage("dashboard")
 
   const handleLogout = () => {
     setCurrentPage("login")
@@ -30,24 +25,34 @@ export default function Home() {
 
   const handleBackToDashboard = () => {
     setCurrentPage("dashboard")
-    setSelectedPatient(null)
+    // importante: NÃO limpar selectedPatient aqui, porque você pode querer voltar e entrar de novo rápido
+    // mas se preferir limpar, pode manter. Eu recomendo manter.
   }
 
-  const handleNavigateToSignUp = () => {
-    setCurrentPage("signup")
-  }
-
-  const handleNavigateToLogin = () => {
-    setCurrentPage("login")
-  }
+  const handleNavigateToSignUp = () => setCurrentPage("signup")
+  const handleNavigateToLogin = () => setCurrentPage("login")
 
   return (
     <>
-      {currentPage === "signup" && <SignUpPage onSignUp={handleSignUp} onNavigateToLogin={handleNavigateToLogin} />}
-      {currentPage === "login" && <LoginPage onLogin={handleLogin} onNavigateToSignUp={handleNavigateToSignUp} />}
-      {currentPage === "dashboard" && <DashboardPage onLogout={handleLogout} onViewPrediction={handleViewPrediction} />}
-      {currentPage === "prediction" && (
-        <PredictionPage onBack={handleBackToDashboard} onNewPrediction={handleBackToDashboard} />
+      {currentPage === "signup" && (
+        <SignUpPage onSignUp={handleSignUp} onNavigateToLogin={handleNavigateToLogin} />
+      )}
+
+      {currentPage === "login" && (
+        <LoginPage onLogin={handleLogin} onNavigateToSignUp={handleNavigateToSignUp} />
+      )}
+
+      {currentPage === "dashboard" && (
+        <DashboardPage onLogout={handleLogout} onViewPrediction={handleViewPrediction} />
+      )}
+
+      {currentPage === "prediction" && selectedPatient && (
+        <PredictionPage onBack={handleBackToDashboard} patientId={selectedPatient} />
+      )}
+
+      {/* fallback se por algum motivo currentPage=prediction mas não tiver selectedPatient */}
+      {currentPage === "prediction" && !selectedPatient && (
+        <DashboardPage onLogout={handleLogout} onViewPrediction={handleViewPrediction} />
       )}
     </>
   )

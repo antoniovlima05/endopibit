@@ -1,160 +1,232 @@
-from app import app
+import os
+from datetime import datetime
+from pathlib import Path
+
 from flask import request, jsonify
-from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
-CORS(app)
+from . import app, db
+from .models import Paciente, Exame
 
-# ===============================================================
-#  AUTENTICAÇÃO
-# ===============================================================
+from flask import send_file
 
-@app.route("/api/auth/login", methods=["POST"])
-def login():
-    data = request.json
-
-    email = data.get("email")
-    senha = data.get("senha")
-
-    # MOCK DE LOGIN (aceita qualquer email/senha)
-    return jsonify({
-        "mensagem": "Login realizado com sucesso.",
-        "token": "token_mock_123",
-        "usuario": {
-            "nome": "Usuário de Teste",
-            "email": email
-        }
-    })
+# 🔥 service layer (MVP sync)
+# Você precisa criar esse arquivo conforme combinamos: backend/app/services_exame.py
+from .services_exame import process_exam_sync
 
 
-@app.route("/api/auth/register", methods=["POST"])
-def register():
-    data = request.json
+# Pasta onde os uploads vão ficar
+UPLOAD_DIR = Path(app.root_path).parent / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    return jsonify({
-        "mensagem": "Usuário registrado.",
-        "usuario": data
-    })
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
 
-# ===============================================================
-#  PACIENTES
-# ===============================================================
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Lista TODOS os pacientes
+
+def status_label(status: str | None) -> str:
+    mapping = {
+        "PENDING": "Pendente",
+        "PROCESSING": "Processando",
+        "COMPLETED": "Concluído",
+        "FAILED": "Falhou",
+    }
+    return mapping.get(status or "", status or "—")
+
+
+# ---------------------------
+# PACIENTES
+# ---------------------------
+
 @app.route("/api/pacientes", methods=["GET"])
 def listar_pacientes():
-    pacientes = [
-        {"id": "P001", "nome": "Maria", "idade": 32, "sexo": "F"},
-        {"id": "P002", "nome": "Ana", "idade": 29, "sexo": "F"}
-    ]
-    return jsonify(pacientes)
+    pacientes = Paciente.query.all()
+    return jsonify([
+        {
+            "id": p.id,
+            "nome": p.nome,
+            "exams": [
+                {
+                    "examId": e.id,
+                    "data": (e.created_at.strftime("%d/%m/%Y") if e.created_at else "—"),
+                    "status": status_label(getattr(e, "status", None)),
+                }
+                for e in p.exames
+            ]
+        }
+        for p in pacientes
+    ])
 
 
-# Busca um paciente pelo ID
-@app.route("/api/pacientes/<id_paciente>", methods=["GET"])
-def buscar_paciente(id_paciente):
-    paciente = {"id": id_paciente, "nome": "Paciente Mock", "idade": 30, "sexo": "F"}
-    return jsonify(paciente)
-
-
-# Cria paciente
 @app.route("/api/pacientes", methods=["POST"])
 def criar_paciente():
-    data = request.json
-    data["id"] = "P003"  # ID mockado
+    data = request.json or {}
+    pid = str(data.get("id") or "").strip()
+    nome = str(data.get("nome") or "Paciente").strip()
+    idade = data.get("idade")
+    sexo_id = data.get("sexo_id")
+    usuario_id = data.get("usuario_id")
 
-    return jsonify({
-        "mensagem": "Paciente criado.",
-        "paciente": data
-    })
+    if not pid:
+        return jsonify({"erro": "id é obrigatório (ex: P001)"}), 400
+
+    if Paciente.query.get(pid):
+        return jsonify({"erro": "ID já existe"}), 409
+
+    p = Paciente(id=pid, nome=nome, idade=idade, sexo_id=sexo_id, usuario_id=usuario_id)
+    db.session.add(p)
+    db.session.commit()
+
+    return jsonify({"id": p.id, "nome": p.nome, "exams": []}), 201
 
 
-# Remove paciente
 @app.route("/api/pacientes/<id_paciente>", methods=["DELETE"])
 def remover_paciente(id_paciente):
+    p = Paciente.query.get(id_paciente)
+    if not p:
+        return jsonify({"mensagem": "Paciente não encontrado."}), 404
+
+    db.session.delete(p)
+    db.session.commit()
     return jsonify({"mensagem": f"Paciente {id_paciente} removido."})
 
 
-# ===============================================================
-#  EXAMES (UPLOAD & LISTAGEM)
-# ===============================================================
+# ---------------------------
+# EXAMES
+# ---------------------------
+
+@app.route("/api/exames/<paciente_id>", methods=["GET"])
+def listar_exames(paciente_id):
+    p = Paciente.query.get(paciente_id)
+    if not p:
+        return jsonify({"erro": "Paciente não encontrado"}), 404
+
+    exams = []
+    for e in p.exames:
+        exams.append({
+            "examId": e.id,
+            "pacienteId": e.paciente_id,
+            "imagem_path": e.imagem_path,
+            "original_filename": getattr(e, "original_filename", None),
+            "resultado": e.resultado,
+            "confianca": e.confianca,
+            "model_name": getattr(e, "model_name", None),
+            "model_version": getattr(e, "model_version", None),
+            "processed_at": (e.processed_at.isoformat() if getattr(e, "processed_at", None) else None),
+            "error_message": getattr(e, "error_message", None),
+            "data": (e.created_at.strftime("%d/%m/%Y") if e.created_at else "—"),
+            "status": status_label(getattr(e, "status", None)),
+        })
+
+    return jsonify(exams)
+
 
 @app.route("/api/exames/upload", methods=["POST"])
 def upload_exame():
-    if "arquivo" not in request.files:
-        return jsonify({"erro": "Nenhum arquivo enviado."}), 400
+    # form-data: paciente_id + file
+    paciente_id = (request.form.get("paciente_id") or "").strip()
+    if not paciente_id:
+        return jsonify({"erro": "paciente_id é obrigatório"}), 400
 
-    arquivo = request.files["arquivo"]
+    p = Paciente.query.get(paciente_id)
+    if not p:
+        return jsonify({"erro": "Paciente não encontrado"}), 404
 
-    # MOCK
+    if "file" not in request.files:
+        return jsonify({"erro": "arquivo (file) é obrigatório"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"erro": "arquivo sem nome"}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({"erro": f"Formato inválido. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}), 400
+
+    # gera um ID simples pro exame (pode trocar por uuid depois)
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    exam_id = f"E{stamp}"
+
+    original_name = file.filename
+    filename = secure_filename(file.filename)
+    ext = filename.rsplit(".", 1)[1].lower()
+
+    saved_name = f"{exam_id}.{ext}"
+    saved_path = UPLOAD_DIR / saved_name
+    file.save(saved_path)
+
+    e = Exame(
+        id=exam_id,
+        paciente_id=paciente_id,
+        imagem_path=str(saved_path),
+        original_filename=original_name,
+        status="PENDING",
+        resultado=None,
+        confianca=None,
+        model_name=None,
+        model_version=None,
+        processed_at=None,
+        error_message=None,
+    )
+
+    db.session.add(e)
+    db.session.commit()
+
+    # 🔥 dispara classificação automaticamente (MVP sync)
+    # Depois a gente troca isso por fila (RQ/Redis) sem mexer no endpoint.
+    try:
+        process_exam_sync(e.id)
+    except Exception:
+        # o service já marca FAILED e salva error_message
+        pass
+
+    # recarrega para pegar status/result atualizado
+    e = Exame.query.get(e.id) or e
+
     return jsonify({
-        "mensagem": "Arquivo recebido.",
-        "nome_arquivo": arquivo.filename,
-        "url": f"/storage/{arquivo.filename}"
-    })
+        "examId": e.id,
+        "pacienteId": e.paciente_id,
+        "imagem_path": e.imagem_path,
+        "original_filename": getattr(e, "original_filename", None),
+        "status": getattr(e, "status", None),                 # status técnico
+        "statusLabel": status_label(getattr(e, "status", None)),  # label UI
+        "resultado": e.resultado,
+        "confianca": e.confianca,
+        "model_name": getattr(e, "model_name", None),
+        "model_version": getattr(e, "model_version", None),
+        "processed_at": (e.processed_at.isoformat() if getattr(e, "processed_at", None) else None),
+        "error_message": getattr(e, "error_message", None),
+    }), 201
 
 
-@app.route("/api/exames/<id_paciente>", methods=["GET"])
-def listar_exames(id_paciente):
-    exames = [
-        {"imagem": "/storage/exame1.png", "resultado": "com_endometriose", "confianca": 0.92},
-        {"imagem": "/storage/exame2.png", "resultado": "sem_endometriose", "confianca": 0.81}
-    ]
-    return jsonify(exames)
+@app.route("/api/exames/<exam_id>", methods=["DELETE"])
+def deletar_exame(exam_id):
+    e = Exame.query.get(exam_id)
+    if not e:
+        return jsonify({"erro": "Exame não encontrado"}), 404
 
+    # tenta apagar arquivo do disco (se existir)
+    try:
+        if e.imagem_path and os.path.exists(e.imagem_path):
+            os.remove(e.imagem_path)
+    except Exception:
+        pass
 
-# ===============================================================
-#  MODELOS IA (MOCK)
-# ===============================================================
+    db.session.delete(e)
+    db.session.commit()
+    return jsonify({"mensagem": f"Exame {exam_id} removido."})
 
-@app.route("/api/ia/classificar", methods=["POST"])
-def classificar():
-    # sem IA real, devolve valores aleatórios mockados
-    return jsonify({
-        "resultado": "com_endometriose",
-        "confianca": 0.91
-    })
+@app.route("/api/exames/<exam_id>/file", methods=["GET"])
+def baixar_arquivo_exame(exam_id):
+    e = Exame.query.get(exam_id)
+    if not e or not e.imagem_path:
+        return jsonify({"erro": "Arquivo não encontrado"}), 404
 
+    if not os.path.exists(e.imagem_path):
+        return jsonify({"erro": "Arquivo não existe no disco"}), 404
 
-@app.route("/api/ia/segmentar", methods=["POST"])
-def segmentar():
-    return jsonify({
-        "mascara": "data:image/png;base64,AAAAAA_MOCK",
-        "confianca": 0.87
-    })
+    # serve a imagem para o frontend conseguir renderizar <img src="...">
+    return send_file(e.imagem_path)
 
-
-@app.route("/api/ia/analisar-exame", methods=["POST"])
-def analisar_exame():
-    data = request.json
-    paciente = data.get("idPaciente", "desconhecido")
-
-    # MOCK DE PIPELINE
-    return jsonify({
-        "idPaciente": paciente,
-        "resultadoFinal": "com_endometriose",
-        "confiancaMedia": 0.89,
-        "classificacoes": [
-            {
-                "imagem": "/storage/img1.png",
-                "resultado": "com_endometriose",
-                "confianca": 0.92,
-                "mascara": "/storage/mask1.png"
-            },
-            {
-                "imagem": "/storage/img2.png",
-                "resultado": "sem_endometriose",
-                "confianca": 0.81,
-                "mascara": "/storage/mask2.png"
-            }
-        ]
-    })
-
-
-# ===============================================================
-#  TESTE
-# ===============================================================
-
-@app.route("/api/test", methods=["GET"])
-def test():
-    return jsonify({"mensagem": "API funcionando!"})
+from flask import send_file
