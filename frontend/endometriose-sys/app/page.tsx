@@ -25,8 +25,7 @@ export default function Home() {
 
   const handleBackToDashboard = () => {
     setCurrentPage("dashboard")
-    // importante: NÃO limpar selectedPatient aqui, porque você pode querer voltar e entrar de novo rápido
-    // mas se preferir limpar, pode manter. Eu recomendo manter.
+    // Mantemos o selectedPatient para facilitar voltar ao mesmo exame
   }
 
   const handleNavigateToSignUp = () => setCurrentPage("signup")
@@ -35,24 +34,39 @@ export default function Home() {
   return (
     <>
       {currentPage === "signup" && (
-        <SignUpPage onSignUp={handleSignUp} onNavigateToLogin={handleNavigateToLogin} />
+        <SignUpPage 
+          onSignUp={handleSignUp} 
+          onNavigateToLogin={handleNavigateToLogin} 
+        />
       )}
 
       {currentPage === "login" && (
-        <LoginPage onLogin={handleLogin} onNavigateToSignUp={handleNavigateToSignUp} />
+        <LoginPage 
+          onLogin={handleLogin} 
+          onNavigateToSignUp={handleNavigateToSignUp} 
+        />
       )}
 
       {currentPage === "dashboard" && (
-        <DashboardPage onLogout={handleLogout} onViewPrediction={handleViewPrediction} />
+        <DashboardPage 
+          onLogout={handleLogout} 
+          onViewPrediction={handleViewPrediction} 
+        />
       )}
 
       {currentPage === "prediction" && selectedPatient && (
-        <PredictionPage onBack={handleBackToDashboard} patientId={selectedPatient} />
+        <PredictionPage 
+          onBack={handleBackToDashboard} 
+          patientId={selectedPatient} 
+        />
       )}
 
-      {/* fallback se por algum motivo currentPage=prediction mas não tiver selectedPatient */}
+      {/* Fallback de segurança */}
       {currentPage === "prediction" && !selectedPatient && (
-        <DashboardPage onLogout={handleLogout} onViewPrediction={handleViewPrediction} />
+        <DashboardPage 
+          onLogout={handleLogout} 
+          onViewPrediction={handleViewPrediction} 
+        />
       )}
     </>
   )

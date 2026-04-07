@@ -13,21 +13,19 @@ type ApiExam = {
   pacienteId: string
   imagem_path: string
   original_filename?: string | null
-  status: string // label PT no seu backend atual (ex: "Concluído")
+  status: string
   resultado: string | null
-  confianca: number | null // 0..1
+  confianca: number | null
   processed_at?: string | null
   error_message?: string | null
-  model_name?: string | null
-  model_version?: string | null
 }
 
 type ExamImage = {
   id: string
   url: string
+  overlayUrl: string | null          // ← Novo: suporte a máscara
   aiClassification: "com" | "sem" | "—"
-  mask: string | null
-  confidence: number // 0..100
+  confidence: number
   status: string
   resultado: string | null
   processed_at?: string | null
@@ -38,12 +36,8 @@ type ExamImage = {
 function mapResultadoToClass(resultado: string | null): "com" | "sem" | "—" {
   if (!resultado) return "—"
   const r = resultado.toLowerCase()
-
-  // ajuste aqui conforme seus rótulos reais depois
-  if (r.includes("neg")) return "sem"
-  if (r.includes("pos")) return "com"
-
-  // fallback
+  if (r.includes("neg") || r.includes("sem")) return "sem"
+  if (r.includes("pos") || r.includes("com")) return "com"
   return "—"
 }
 
@@ -60,11 +54,10 @@ export default function PredictionPage({
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  const [showClassification, setShowClassification] = useState(true)
+  const [showClassification, setShowClassification] = useState(false)
   const [showSegmentation, setShowSegmentation] = useState(false)
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [isViewingMask, setIsViewingMask] = useState(false)
 
   const [imageZoom, setImageZoom] = useState(100)
   const [panX, setPanX] = useState(0)
@@ -75,12 +68,14 @@ export default function PredictionPage({
   const [classificationResults, setClassificationResults] = useState<Record<string, "com" | "sem" | "—">>({})
   const [classificationValidation, setClassificationValidation] = useState<Record<string, "correct" | "incorrect" | null>>({})
 
+  // ==================== CARREGAR EXAMES ====================
   const loadExams = async () => {
     setLoading(true)
     setErrorMsg(null)
     try {
       const res = await fetch(`${API}/api/exames/${encodeURIComponent(patientId)}`, { cache: "no-store" })
       if (!res.ok) throw new Error(`Falha ao buscar exames (${res.status})`)
+
       const data: ApiExam[] = await res.json()
 
       const mapped: ExamImage[] = (Array.isArray(data) ? data : []).map((e) => {
@@ -89,9 +84,9 @@ export default function PredictionPage({
 
         return {
           id: e.examId,
-          url: `${API}/api/exames/${encodeURIComponent(e.examId)}/file`, // 👈 precisa do endpoint no backend
+          url: `${API}/api/exames/${encodeURIComponent(e.examId)}/file`,
+          overlayUrl: null,                    // ← Será preenchido quando tiver segmentação
           aiClassification: cls,
-          mask: null, // segmentação depois
           confidence: conf,
           status: e.status,
           resultado: e.resultado,
@@ -103,17 +98,15 @@ export default function PredictionPage({
 
       setExamImages(mapped)
 
-      // inicializa classificação com o que veio do backend
       const results: Record<string, "com" | "sem" | "—"> = {}
       mapped.forEach((img) => (results[img.id] = img.aiClassification))
       setClassificationResults(results)
 
-      setShowClassification(true)
+      setShowClassification(false)
       setShowSegmentation(false)
     } catch (err: any) {
       setErrorMsg(err?.message ?? "Erro ao carregar exames")
       setExamImages([])
-      setClassificationResults({})
     } finally {
       setLoading(false)
     }
@@ -121,21 +114,30 @@ export default function PredictionPage({
 
   useEffect(() => {
     loadExams()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId])
 
+  // ==================== HANDLERS ====================
   const handleClassify = () => {
     setShowClassification(true)
     setShowSegmentation(false)
   }
 
   const handleSegment = () => {
-    alert("Segmentação será integrada depois 🙂")
+    const validComImages = Object.entries(classificationResults)
+      .filter(([id, cls]) => cls === "com" && classificationValidation[id] === "correct")
+
+    if (validComImages.length === 0) {
+      alert("Valide pelo menos uma imagem como 'Com Endometriose' e 'Correto' antes de segmentar.")
+      return
+    }
+
+    setShowSegmentation(true)
+    setShowClassification(false)
+    // TODO: Aqui você pode chamar a API de segmentação no futuro
   }
 
-  const handleImageClick = (id: string, isMask = false) => {
+  const handleImageClick = (id: string) => {
     setSelectedImage(id)
-    setIsViewingMask(isMask)
     setImageZoom(100)
     setPanX(0)
     setPanY(0)
@@ -143,7 +145,6 @@ export default function PredictionPage({
 
   const handleCloseModal = () => {
     setSelectedImage(null)
-    setIsViewingMask(false)
     setImageZoom(100)
     setPanX(0)
     setPanY(0)
@@ -166,6 +167,12 @@ export default function PredictionPage({
 
   const handleMouseUp = () => setIsPanning(false)
 
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (e.deltaY < 0) handleZoomIn()
+    else handleZoomOut()
+  }
+
   const handleValidation = (id: string, value: "correct" | "incorrect") => {
     setClassificationValidation((prev) => ({
       ...prev,
@@ -173,246 +180,294 @@ export default function PredictionPage({
     }))
   }
 
+  // ==================== COMPUTED ====================
   const semImages = examImages.filter((img) => classificationResults[img.id] === "sem")
   const comImages = examImages.filter((img) => classificationResults[img.id] === "com")
+
+  const segmentedImages = examImages.filter(
+    (img) => img.overlayUrl && classificationResults[img.id] === "com" && classificationValidation[img.id] === "correct"
+  )
 
   const selectedImg = examImages.find((img) => img.id === selectedImage)
 
   const averageConfidence = useMemo(() => {
     if (examImages.length === 0) return 0
-    const sum = examImages.reduce((acc, img) => acc + (img.confidence || 0), 0)
+    const sum = examImages.reduce((acc, img) => acc + img.confidence, 0)
     return Math.round(sum / examImages.length)
   }, [examImages])
 
   useEffect(() => {
-    if (selectedImage !== null) document.body.style.overflow = "hidden"
-    else document.body.style.overflow = ""
-    return () => {
-      document.body.style.overflow = ""
-    }
+    document.body.style.overflow = selectedImage !== null ? "hidden" : ""
+    return () => { document.body.style.overflow = "" }
   }, [selectedImage])
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
       <nav className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4" /> Voltar
-          </Button>
-          <div className="flex items-center gap-2 text-primary">
-            <Activity className="h-6 w-6" />
-            <span className="text-xl font-semibold">EndometrioseSys</span>
+        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
+            </Button>
+            <div className="flex items-center gap-2 text-primary">
+              <Activity className="h-6 w-6" />
+              <span className="text-2xl font-semibold">EndometrioSys</span>
+            </div>
           </div>
 
-          <div className="ml-auto">
-            <Button variant="outline" size="sm" onClick={loadExams} disabled={loading} className="gap-2">
-              <RefreshCcw className="h-4 w-4" />
-              {loading ? "Atualizando..." : "Atualizar"}
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" onClick={loadExams} disabled={loading} className="gap-2">
+            <RefreshCcw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Atualizando..." : "Atualizar"}
+          </Button>
         </div>
       </nav>
 
-      <main className="flex-1 container mx-auto px-4 py-6 flex gap-6">
-        <div className="flex-1 flex flex-col">
-          <div className="mb-4">
-            <h1 className="text-2xl font-semibold">Análise de Exame</h1>
-            <p className="text-sm text-muted-foreground">Paciente ID: {patientId}</p>
-            {errorMsg && <p className="text-sm text-destructive mt-2">{errorMsg}</p>}
+      <main className="flex-1 container mx-auto px-6 py-8">
+        <div className="flex gap-8">
+          <div className="flex-1">
+            <div className="mb-8">
+              <h1 className="text-4xl font-bold tracking-tight">Análise de Exame</h1>
+              <p className="text-muted-foreground mt-2">
+                Paciente ID: <strong>{patientId}</strong>
+              </p>
+              {errorMsg && <p className="text-destructive mt-2">{errorMsg}</p>}
+            </div>
+
+            <Card className="shadow-sm">
+              <CardContent className="p-8">
+                {/* Grid inicial de imagens */}
+                {!showClassification && !showSegmentation && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-6">
+                    {examImages.map((img) => (
+                      <Card
+                        key={img.id}
+                        className="group cursor-pointer overflow-hidden hover:ring-2 hover:ring-primary/50 transition-all duration-200"
+                        onClick={() => handleImageClick(img.id)}
+                      >
+                        <div className="relative aspect-video bg-gray-100">
+                          <img
+                            src={img.url}
+                            alt={`Exame ${img.id}`}
+                            className="object-cover w-full h-full"
+                            onError={(e) => (e.currentTarget.src = "/placeholder.svg")}
+                          />
+                        </div>
+                        <p className="text-center py-4 text-sm font-medium">Exame {img.id}</p>
+                      </Card>
+                    ))}
+                    {examImages.length === 0 && !loading && (
+                      <p className="text-muted-foreground">Nenhum exame encontrado para este paciente.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Tela de Classificação */}
+                {showClassification && !showSegmentation && (
+                  <div className="space-y-12">
+                    <div className="bg-emerald-50/80 p-8 rounded-2xl">
+                      <h3 className="font-semibold text-xl mb-6 text-emerald-700">Sem Endometriose</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        {semImages.map((img) => (
+                          <div key={img.id} className="space-y-4">
+                            <Card className="overflow-hidden cursor-pointer" onClick={() => handleImageClick(img.id)}>
+                              <img src={img.url} alt="" className="w-full" />
+                            </Card>
+                            <div className="flex justify-center gap-8">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox checked={classificationValidation[img.id] === "correct"} onCheckedChange={() => handleValidation(img.id, "correct")} />
+                                <span className="text-emerald-600 font-medium">Correto</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox checked={classificationValidation[img.id] === "incorrect"} onCheckedChange={() => handleValidation(img.id, "incorrect")} />
+                                <span className="text-red-600 font-medium">Incorreto</span>
+                              </label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="bg-red-50/80 p-8 rounded-2xl">
+                      <h3 className="font-semibold text-xl mb-6 text-red-700">Com Endometriose</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        {comImages.map((img) => (
+                          <div key={img.id} className="space-y-4">
+                            <Card className="overflow-hidden cursor-pointer" onClick={() => handleImageClick(img.id)}>
+                              <img src={img.url} alt="" className="w-full" />
+                            </Card>
+                            <div className="flex justify-center gap-8">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox checked={classificationValidation[img.id] === "correct"} onCheckedChange={() => handleValidation(img.id, "correct")} />
+                                <span className="text-emerald-600 font-medium">Correto</span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <Checkbox checked={classificationValidation[img.id] === "incorrect"} onCheckedChange={() => handleValidation(img.id, "incorrect")} />
+                                <span className="text-red-600 font-medium">Incorreto</span>
+                              </label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tela de Segmentação */}
+                {showSegmentation && (
+                  <div className="bg-muted/60 p-8 rounded-2xl">
+                    <h3 className="font-semibold mb-3 text-lg">Imagens Segmentadas</h3>
+                    <p className="text-muted-foreground mb-8">Clique em qualquer imagem para visualizar com máscara sobreposta.</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                      {segmentedImages.map((img) => (
+                        <Card
+                          key={img.id}
+                          className="cursor-pointer hover:ring-2 hover:ring-primary transition-all overflow-hidden"
+                          onClick={() => handleImageClick(img.id)}
+                        >
+                          <img 
+                            src={img.overlayUrl || img.url} 
+                            alt={`Imagem ${img.id}`} 
+                            className="w-full" 
+                          />
+                          <p className="text-center py-4 text-sm font-medium">Exame {img.id}</p>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+
+              <div className="p-6 border-t flex gap-4">
+                <Button
+                  onClick={handleClassify}
+                  className="flex-1"
+                  variant={showClassification && !showSegmentation ? "default" : "outline"}
+                >
+                  Classificar
+                </Button>
+                <Button
+                  onClick={handleSegment}
+                  className="flex-1"
+                  disabled={!showClassification}
+                >
+                  Segmentar
+                </Button>
+              </div>
+            </Card>
           </div>
 
-          <Card className="flex-1 flex flex-col overflow-hidden">
-            <CardContent className="flex-1 overflow-auto p-6">
-              {!showClassification && !showSegmentation && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {examImages.map((img) => (
-                    <Card
-                      key={img.id}
-                      className="cursor-pointer hover:ring-2 ring-primary transition-all"
-                      onClick={() => handleImageClick(img.id, false)}
-                    >
-                      <img src={img.url} alt="" className="w-full h-auto rounded-md" />
-                    </Card>
-                  ))}
-                  {examImages.length === 0 && !loading && (
-                    <div className="text-sm text-muted-foreground">Nenhum exame encontrado.</div>
+          {/* Sidebar */}
+          <div className="w-80 shrink-0">
+            <Card className="sticky top-6">
+              <CardContent className="p-6 space-y-6">
+                <div>
+                  <h3 className="font-semibold flex items-center gap-2 mb-3">
+                    <Info className="h-4 w-4" /> Resultado da Análise
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {showSegmentation
+                      ? "Máscaras geradas com sucesso."
+                      : showClassification
+                      ? "Classificação concluída."
+                      : "Execute uma ação para continuar."}
+                  </p>
+                  {averageConfidence > 0 && (
+                    <p className="mt-4 text-sm">
+                      Confiança média: <strong className="font-semibold">{averageConfidence}%</strong>
+                    </p>
                   )}
                 </div>
-              )}
 
-              {showClassification && !showSegmentation && (
-                <div className="space-y-8">
-                  <div className="bg-gray-100 p-5 rounded-lg">
-                    <h3 className="font-semibold mb-3 text-green-700">Sem Endometriose</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {semImages.map((img) => (
-                        <div key={img.id} className="space-y-2">
-                          <Card className="cursor-pointer hover:ring-2 ring-primary" onClick={() => handleImageClick(img.id, false)}>
-                            <img src={img.url} alt="" className="w-full h-auto rounded-md" />
-                          </Card>
-                          <div className="flex justify-center gap-3">
-                            <label className="flex items-center gap-1 text-xs">
-                              <Checkbox checked={classificationValidation[img.id] === "correct"} onCheckedChange={() => handleValidation(img.id, "correct")} />
-                              <span className="text-green-600">Correto</span>
-                            </label>
-                            <label className="flex items-center gap-1 text-xs">
-                              <Checkbox checked={classificationValidation[img.id] === "incorrect"} onCheckedChange={() => handleValidation(img.id, "incorrect")} />
-                              <span className="text-red-600">Incorreto</span>
-                            </label>
-                          </div>
-                        </div>
-                      ))}
-                      {semImages.length === 0 && <div className="text-sm text-muted-foreground">Nenhuma imagem classificada como "sem".</div>}
-                    </div>
-                  </div>
-
-                  <div className="bg-red-50 p-5 rounded-lg">
-                    <h3 className="font-semibold mb-3 text-red-700">Com Endometriose</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {comImages.map((img) => (
-                        <div key={img.id} className="space-y-2">
-                          <Card className="cursor-pointer hover:ring-2 ring-primary" onClick={() => handleImageClick(img.id, false)}>
-                            <img src={img.url} alt="" className="w-full h-auto rounded-md" />
-                          </Card>
-                          <div className="flex justify-center gap-3">
-                            <label className="flex items-center gap-1 text-xs">
-                              <Checkbox checked={classificationValidation[img.id] === "correct"} onCheckedChange={() => handleValidation(img.id, "correct")} />
-                              <span className="text-green-600">Correto</span>
-                            </label>
-                            <label className="flex items-center gap-1 text-xs">
-                              <Checkbox checked={classificationValidation[img.id] === "incorrect"} onCheckedChange={() => handleValidation(img.id, "incorrect")} />
-                              <span className="text-red-600">Incorreto</span>
-                            </label>
-                          </div>
-                        </div>
-                      ))}
-                      {comImages.length === 0 && <div className="text-sm text-muted-foreground">Nenhuma imagem classificada como "com".</div>}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {showSegmentation && (
-                <div className="bg-muted p-6 rounded-lg">
-                  <h3 className="font-semibold mb-3">Máscaras Ilustrativas</h3>
-                  <p className="text-sm text-muted-foreground mb-4">Segmentação será integrada depois.</p>
-                </div>
-              )}
-            </CardContent>
-
-            <div className="p-4 border-t flex gap-3">
-              <Button onClick={handleClassify} className="flex-1" variant={showClassification ? "default" : "outline"}>
-                Classificar
-              </Button>
-              <Button onClick={handleSegment} className="flex-1">
-                Segmentar
-              </Button>
-            </div>
-          </Card>
-        </div>
-
-        <div className="w-80">
-          <Card>
-            <CardContent className="p-4 space-y-4">
-              <div>
-                <h3 className="font-semibold flex items-center gap-2">
-                  <Info className="h-4 w-4" /> Resultado da Análise
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {showSegmentation ? "Máscaras (futuro)." : showClassification ? "Classificação concluída." : "Execute uma ação."}
-                </p>
-                {averageConfidence > 0 && (
-                  <p className="text-sm font-medium mt-2">
-                    Confiança média: <strong>{averageConfidence}%</strong>
-                  </p>
-                )}
-              </div>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full">
-                    <Download className="h-4 w-4 mr-2" /> Exportar <ChevronDown className="h-4 w-4 ml-2" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-full">
-                  <DropdownMenuItem>PDF</DropdownMenuItem>
-                  <DropdownMenuItem>PNG</DropdownMenuItem>
-                  <DropdownMenuItem>DICOM</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardContent>
-          </Card>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-full">
+                      <Download className="mr-2 h-4 w-4" />
+                      Exportar relatório
+                      <ChevronDown className="ml-2 h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>PDF Completo</DropdownMenuItem>
+                    <DropdownMenuItem>Imagens + Máscaras</DropdownMenuItem>
+                    <DropdownMenuItem>DICOM Export</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </main>
 
+      {/* ====================== MODAL DE VISUALIZAÇÃO ====================== */}
       {selectedImage !== null && selectedImg && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-8" onClick={handleCloseModal}>
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4"
+          onClick={handleCloseModal}
+        >
           <div
-            className="bg-white rounded-xl shadow-2xl w-[min(90vw,90vh)] h-[min(90vw,90vh)] overflow-hidden flex flex-col"
+            className="bg-white rounded-3xl shadow-2xl w-[min(94vw,94vh)] h-[min(94vw,94vh)] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
+            <div className="p-6 border-b bg-gray-50 flex justify-between items-start">
               <div>
-                {isViewingMask ? (
+                <h3 className="text-2xl font-semibold">Exame {selectedImg.id}</h3>
+                {(showClassification || showSegmentation) && (
                   <>
-                    <h3 className="font-semibold">Máscara (futuro)</h3>
-                    <p className="text-sm text-red-600">Segmentação será integrada depois</p>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="font-semibold">Exame {selectedImg.id}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Resultado: <strong>{selectedImg.resultado ?? "—"}</strong> • Status: <strong>{selectedImg.status}</strong>
+                    <p className="mt-1 text-sm">
+                      Classificação IA:{" "}
+                      <strong className={selectedImg.aiClassification === "com" ? "text-red-600" : "text-emerald-600"}>
+                        {selectedImg.aiClassification === "com" ? "Com Endometriose" : "Sem Endometriose"}
+                      </strong>
                     </p>
-                    <p className="text-sm font-medium">
+                    <p className="text-sm text-muted-foreground mt-0.5">
                       Confiança do modelo: <strong>{selectedImg.confidence}%</strong>
                     </p>
-                    {selectedImg.error_message && <p className="text-sm text-destructive">Erro: {selectedImg.error_message}</p>}
                   </>
+                )}
+                {showSegmentation && selectedImg.overlayUrl && (
+                  <p className="mt-1 text-sm text-muted-foreground">Visualização com máscara sobreposta</p>
                 )}
               </div>
               <Button size="icon" variant="ghost" onClick={handleCloseModal}>
-                <X className="h-5 w-5" />
+                <X className="h-6 w-6" />
               </Button>
             </div>
 
-            <div className="flex-1 bg-black p-6 flex items-center justify-center overflow-hidden relative">
+            <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
               <div
-                className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing"
+                className="w-full h-full flex items-center justify-center select-none cursor-grab active:cursor-grabbing"
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
-                onWheel={(e) => {
-                  e.preventDefault()
-                  if (e.deltaY < 0) handleZoomIn()
-                  else handleZoomOut()
-                }}
+                onWheel={handleWheel}
               >
                 <img
-                  src={selectedImg.url}
-                  alt="Zoom"
-                  className="max-w-none select-none"
+                  src={showSegmentation && selectedImg.overlayUrl ? selectedImg.overlayUrl : selectedImg.url}
+                  alt={`Exame ${selectedImg.id}`}
+                  className="max-w-none"
                   style={{
                     transform: `translate(${panX}px, ${panY}px) scale(${imageZoom / 100})`,
                     transformOrigin: "center center",
-                    transition: isPanning ? "none" : "transform 0.15s ease-out",
+                    transition: isPanning ? "none" : "transform 0.2s ease-out",
                   }}
                   draggable={false}
                 />
               </div>
 
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur px-4 py-2 rounded-full flex items-center gap-3 shadow-lg">
-                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleZoomOut} disabled={imageZoom <= 50}>
-                  <Minus className="h-4 w-4" />
+              {/* Controles de Zoom */}
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-6 py-3 rounded-full shadow-2xl flex items-center gap-5">
+                <Button size="icon" variant="ghost" onClick={handleZoomOut} disabled={imageZoom <= 50}>
+                  <Minus className="h-5 w-5" />
                 </Button>
-                <span className="font-medium text-sm min-w-12 text-center">{imageZoom}%</span>
-                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleZoomIn} disabled={imageZoom >= 400}>
-                  <Plus className="h-4 w-4" />
+                <span className="font-mono text-base font-semibold w-16 text-center">{imageZoom}%</span>
+                <Button size="icon" variant="ghost" onClick={handleZoomIn} disabled={imageZoom >= 400}>
+                  <Plus className="h-5 w-5" />
                 </Button>
               </div>
 
-              <div className="absolute top-4 left-4 text-white/80 text-xs bg-black/50 px-3 py-1 rounded-md">
+              <div className="absolute top-6 left-6 bg-black/70 text-white/90 text-xs px-4 py-2 rounded-xl">
                 Role o mouse • Arraste para mover
               </div>
             </div>

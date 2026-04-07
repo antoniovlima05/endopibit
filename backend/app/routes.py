@@ -13,6 +13,7 @@ from flask import send_file
 # 🔥 service layer (MVP sync)
 # Você precisa criar esse arquivo conforme combinamos: backend/app/services_exame.py
 from .services_exame import process_exam_sync
+from uuid import uuid4
 
 
 # Pasta onde os uploads vão ficar
@@ -115,6 +116,7 @@ def listar_exames(paciente_id):
             "model_name": getattr(e, "model_name", None),
             "model_version": getattr(e, "model_version", None),
             "processed_at": (e.processed_at.isoformat() if getattr(e, "processed_at", None) else None),
+            "processing_time": getattr(e, "processing_time", None),
             "error_message": getattr(e, "error_message", None),
             "data": (e.created_at.strftime("%d/%m/%Y") if e.created_at else "—"),
             "status": status_label(getattr(e, "status", None)),
@@ -145,8 +147,7 @@ def upload_exame():
         return jsonify({"erro": f"Formato inválido. Use: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}), 400
 
     # gera um ID simples pro exame (pode trocar por uuid depois)
-    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    exam_id = f"E{stamp}"
+    exam_id = f"E{uuid4().hex[:12].upper()}"
 
     original_name = file.filename
     filename = secure_filename(file.filename)
@@ -196,6 +197,7 @@ def upload_exame():
         "model_name": getattr(e, "model_name", None),
         "model_version": getattr(e, "model_version", None),
         "processed_at": (e.processed_at.isoformat() if getattr(e, "processed_at", None) else None),
+        "processing_time": getattr(e, "processing_time", None),
         "error_message": getattr(e, "error_message", None),
     }), 201
 

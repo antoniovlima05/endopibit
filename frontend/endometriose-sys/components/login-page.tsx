@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,10 +16,23 @@ interface LoginPageProps {
 export default function LoginPage({ onLogin, onNavigateToSignUp }: LoginPageProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onLogin()
+
+    if (!email.trim() || !password.trim()) {
+      alert("Por favor, preencha todos os campos.")
+      return
+    }
+
+    setIsLoading(true)
+
+    // Simulação de login (substitua depois pela chamada real para o backend)
+    setTimeout(() => {
+      setIsLoading(false)
+      onLogin()
+    }, 800)
   }
 
   return (
@@ -30,12 +42,13 @@ export default function LoginPage({ onLogin, onNavigateToSignUp }: LoginPageProp
           <div className="flex justify-center">
             <div className="flex items-center gap-2 text-primary">
               <Activity className="h-8 w-8" />
-              <span className="text-2xl font-semibold">EndometrioseSys</span>
+              <span className="text-2xl font-semibold">EndometrioSys</span>
             </div>
           </div>
-          <CardTitle className="text-2xl">Bem-vindo</CardTitle>
+          <CardTitle className="text-3xl">Bem-vindo</CardTitle>
           <CardDescription>Sistema de apoio à decisão clínica para detecção de endometriose.</CardDescription>
         </CardHeader>
+
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -49,6 +62,7 @@ export default function LoginPage({ onLogin, onNavigateToSignUp }: LoginPageProp
                 required
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
               <Input
@@ -60,16 +74,24 @@ export default function LoginPage({ onLogin, onNavigateToSignUp }: LoginPageProp
                 required
               />
             </div>
-            <Button type="submit" className="w-full">
-              Entrar
+
+            {/* Botão de login com loading */}
+            <Button 
+              type="submit" 
+              className="w-full bg-primary hover:bg-primary/90" 
+              disabled={isLoading}
+            >
+              {isLoading ? "Entrando..." : "Entrar"}
             </Button>
-            <div className="text-center">
+
+            {/* Link para cadastro */}
+            <div className="text-center text-sm">
               <button
                 type="button"
                 onClick={onNavigateToSignUp}
-                className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                className="text-muted-foreground hover:text-primary transition-colors"
               >
-                Não tem conta? Cadastrar
+                Não tem conta? <span className="font-medium">Cadastrar</span>
               </button>
             </div>
           </form>

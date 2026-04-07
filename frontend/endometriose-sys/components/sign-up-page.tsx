@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,23 +14,39 @@ interface SignUpPageProps {
 }
 
 export default function SignUpPage({ onSignUp, onNavigateToLogin }: SignUpPageProps) {
-  const [nomeCompleto, setNomeCompleto] = useState("")
+  const [name, setName] = useState("")
   const [crm, setCrm] = useState("")
   const [email, setEmail] = useState("")
-  const [senha, setSenha] = useState("")
-  const [confirmarSenha, setConfirmarSenha] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validate passwords match
-    if (senha !== confirmarSenha) {
-      alert("As senhas não coincidem")
+    // Validações
+    if (password !== confirmPassword) {
+      alert("As senhas não coincidem!")
       return
     }
 
-    // Simulate account creation
-    onSignUp()
+    if (password.length < 6) {
+      alert("A senha deve ter pelo menos 6 caracteres.")
+      return
+    }
+
+    if (!crm.trim()) {
+      alert("O campo CRM é obrigatório.")
+      return
+    }
+
+    setIsLoading(true)
+
+    // Simulação de cadastro (você pode substituir depois pela chamada real para o backend)
+    setTimeout(() => {
+      setIsLoading(false)
+      onSignUp()
+    }, 800)
   }
 
   return (
@@ -41,25 +56,29 @@ export default function SignUpPage({ onSignUp, onNavigateToLogin }: SignUpPagePr
           <div className="flex justify-center">
             <div className="flex items-center gap-2 text-primary">
               <Activity className="h-8 w-8" />
-              <span className="text-2xl font-semibold">EndometrioseSys</span>
+              <span className="text-2xl font-semibold">EndometrioSys</span>
             </div>
           </div>
-          <CardTitle className="text-2xl">Cadastrar Médico</CardTitle>
+          <CardTitle className="text-3xl">Cadastrar Médico</CardTitle>
           <CardDescription>Crie sua conta para acessar o sistema</CardDescription>
         </CardHeader>
+
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Nome completo */}
             <div className="space-y-2">
-              <Label htmlFor="nomeCompleto">Nome completo</Label>
+              <Label htmlFor="name">Nome completo</Label>
               <Input
-                id="nomeCompleto"
+                id="name"
                 type="text"
                 placeholder="Dr. João Silva"
-                value={nomeCompleto}
-                onChange={(e) => setNomeCompleto(e.target.value)}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 required
               />
             </div>
+
+            {/* CRM */}
             <div className="space-y-2">
               <Label htmlFor="crm">CRM</Label>
               <Input
@@ -71,6 +90,8 @@ export default function SignUpPage({ onSignUp, onNavigateToLogin }: SignUpPagePr
                 required
               />
             </div>
+
+            {/* Email */}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -82,38 +103,50 @@ export default function SignUpPage({ onSignUp, onNavigateToLogin }: SignUpPagePr
                 required
               />
             </div>
+
+            {/* Senha */}
             <div className="space-y-2">
-              <Label htmlFor="senha">Senha</Label>
+              <Label htmlFor="password">Senha</Label>
               <Input
-                id="senha"
+                id="password"
                 type="password"
                 placeholder="••••••••"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
+
+            {/* Confirmar senha */}
             <div className="space-y-2">
-              <Label htmlFor="confirmarSenha">Confirmar senha</Label>
+              <Label htmlFor="confirmPassword">Confirmar senha</Label>
               <Input
-                id="confirmarSenha"
+                id="confirmPassword"
                 type="password"
                 placeholder="••••••••"
-                value={confirmarSenha}
-                onChange={(e) => setConfirmarSenha(e.target.value)}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 required
               />
             </div>
-            <Button type="submit" className="w-full">
-              Criar conta
+
+            {/* Botão de cadastro */}
+            <Button 
+              type="submit" 
+              className="w-full bg-primary hover:bg-primary/90" 
+              disabled={isLoading}
+            >
+              {isLoading ? "Cadastrando..." : "Criar conta"}
             </Button>
-            <div className="text-center">
+
+            {/* Link para login */}
+            <div className="text-center text-sm">
               <button
                 type="button"
                 onClick={onNavigateToLogin}
-                className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                className="text-muted-foreground hover:text-primary transition-colors"
               >
-                Já tem uma conta? Entrar
+                Já tem uma conta? <span className="font-medium">Entrar</span>
               </button>
             </div>
           </form>

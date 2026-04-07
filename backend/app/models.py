@@ -118,6 +118,7 @@ class Exame(db.Model):
     model_version: Mapped[str | None] = mapped_column(nullable=True)
 
     processed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_time: Mapped[float | None] = mapped_column(nullable=True)
     error_message: Mapped[str | None] = mapped_column(nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

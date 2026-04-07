@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { FileSearch, Trash2, ChevronDown, Eye, EyeOff, Upload } from "lucide-react"
+import { FileSearch, Trash2, ChevronDown, Eye, EyeOff, Upload, RefreshCw } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -54,13 +54,11 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
 
   const [searchTerm, setSearchTerm] = useState("")
   const [expandedPatients, setExpandedPatients] = useState<Set<string>>(new Set())
-
   const [patients, setPatients] = useState<Patient[]>([])
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-
-  // Upload state
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
+
   const pendingPatientIdRef = useRef<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -74,7 +72,7 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
 
   const getStatusVariant = (status: string) => {
     if (status === "Concluído") return "default"
-    if (status === "Falhou") return "destructive" as any
+    if (status === "Falhou") return "destructive"
     return "secondary"
   }
 
@@ -96,14 +94,13 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
 
   useEffect(() => {
     loadPatients()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const filteredPatients = useMemo(() => {
     const searchLower = searchTerm.toLowerCase()
-    return patients.filter((patient) => {
-      return patient.nome.toLowerCase().includes(searchLower) || patient.id.toLowerCase().includes(searchLower)
-    })
+    return patients.filter((patient) =>
+      patient.nome.toLowerCase().includes(searchLower) || patient.id.toLowerCase().includes(searchLower)
+    )
   }, [patients, searchTerm])
 
   const handleDeletePatient = async (patientId: string) => {
@@ -111,10 +108,9 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
     if (!ok) return
 
     try {
-      const res = await fetch(`${API}/api/pacientes/${encodeURIComponent(patientId)}`, {
-        method: "DELETE",
-      })
+      const res = await fetch(`${API}/api/pacientes/${encodeURIComponent(patientId)}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`Falha ao excluir (${res.status})`)
+      
       setPatients((prev) => prev.filter((p) => p.id !== patientId))
       setExpandedPatients((prev) => {
         const next = new Set(prev)
@@ -126,24 +122,19 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
     }
   }
 
-  // 1) Clique no botão "Analisar" abre seletor de arquivo
   const startUploadForPatient = (patientId: string) => {
     pendingPatientIdRef.current = patientId
     fileInputRef.current?.click()
   }
 
-  // 2) Ao selecionar o arquivo, faz upload real para o backend
   const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     const patientId = pendingPatientIdRef.current
-
-    // limpa o input para permitir escolher o mesmo arquivo de novo depois
     e.target.value = ""
 
     if (!file || !patientId) return
 
     setUploadingFor(patientId)
-    setErrorMsg(null)
 
     try {
       const fd = new FormData()
@@ -156,14 +147,9 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
       })
 
       const payload = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(payload?.erro ?? `Falha no upload (${res.status})`)
-      }
+      if (!res.ok) throw new Error(payload?.erro ?? `Falha no upload (${res.status})`)
 
-      // Atualiza a lista para refletir novo exame/status
       await loadPatients()
-
-      // Abre a tela de análise do paciente
       onViewPrediction(patientId)
 
     } catch (err: any) {
@@ -176,7 +162,7 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
 
   return (
     <div className="space-y-4">
-      {/* input invisível para upload */}
+      {/* Input invisível para upload */}
       <input
         ref={fileInputRef}
         type="file"
@@ -185,7 +171,7 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
         onChange={onFileSelected}
       />
 
-      {/* Busca + ações */}
+      {/* Busca + Recarregar */}
       <div className="flex gap-2 items-center">
         <Input
           placeholder="Buscar por nome ou ID..."
@@ -199,9 +185,9 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
           size="sm"
           onClick={loadPatients}
           disabled={loading}
-          className="ml-auto"
-          title="Recarregar pacientes"
+          className="ml-auto gap-2"
         >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           {loading ? "Carregando..." : "Recarregar"}
         </Button>
       </div>
@@ -218,7 +204,6 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
           <TableHeader>
             <TableRow className="border-b">
               <TableHead className="w-12"></TableHead>
-
               <TableHead className="w-1/4 px-4">
                 <div className="flex items-center gap-2">
                   <span>Nome</span>
@@ -231,7 +216,6 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
                   </button>
                 </div>
               </TableHead>
-
               <TableHead className="w-1/6 px-4">ID</TableHead>
               <TableHead className="w-1/6 px-4">Data</TableHead>
               <TableHead className="w-1/6 px-4">Status</TableHead>
@@ -241,7 +225,7 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
 
           <TableBody>
             {filteredPatients.map((patient) => (
-              <tbody key={patient.id}>
+              <React.Fragment key={patient.id}>
                 {/* Linha principal */}
                 <TableRow className="border-b">
                   <TableCell className="w-12">
@@ -257,12 +241,16 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
                     )}
                   </TableCell>
 
-                  <TableCell className="font-medium px-4">{showPatientNames ? patient.nome : "••••••••"}</TableCell>
+                  <TableCell className="font-medium px-4">
+                    {showPatientNames ? patient.nome : "••••••••"}
+                  </TableCell>
                   <TableCell className="text-muted-foreground px-4">{patient.id}</TableCell>
                   <TableCell className="text-muted-foreground px-4">{patient.exams[0]?.data}</TableCell>
 
                   <TableCell className="px-4">
-                    <Badge variant={getStatusVariant(patient.exams[0]?.status)}>{patient.exams[0]?.status}</Badge>
+                    <Badge variant={getStatusVariant(patient.exams[0]?.status)}>
+                      {patient.exams[0]?.status}
+                    </Badge>
                   </TableCell>
 
                   <TableCell className="text-right px-4">
@@ -271,8 +259,8 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
                         variant="ghost"
                         size="sm"
                         onClick={() => startUploadForPatient(patient.id)}
-                        className="gap-2"
                         disabled={uploadingFor === patient.id}
+                        className="gap-2"
                         title="Enviar exame e analisar"
                       >
                         {uploadingFor === patient.id ? (
@@ -316,7 +304,7 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
                       <TableCell className="text-right px-4"></TableCell>
                     </TableRow>
                   ))}
-              </tbody>
+              </React.Fragment>
             ))}
 
             {!loading && filteredPatients.length === 0 && (
