@@ -1,44 +1,28 @@
-from datetime import datetime
-import time
-from sqlalchemy.exc import SQLAlchemyError
+from app.ai.classification.predict_classification import predict_classification
+from app.ai.segmentation.transunet.predict_segmentation import predict_segmentation
+import cv2
 
-from . import db
-from .models import Exame
-from .ai_classifier import predict
-
-def process_exam_sync(exam_id: str) -> None:
-    e = Exame.query.get(exam_id)
-    if not e:
-        return
-
-    start_time = time.perf_counter()
-
+def process_exam_sync(exam):
     try:
-        e.status = "PROCESSING"
+        # Classificação
+        class_id, confidence = predict_classification(exam.imagem_path)
+        
+        # Salvar resultado da classificação
+        exam.resultado = "com endometriose" if class_id == 0 else "sem endometriose"
+        exam.confianca = confidence
+        
+        # Se for "com endometriose", aplicar segmentação
+        if class_id == 0:
+            mask = predict_segmentation(exam.imagem_path)
+            # Aqui você pode salvar a máscara gerada, por exemplo, em /uploads/masks/
+            mask_path = f"uploads/masks/{exam.id}_mask.png"
+            cv2.imwrite(mask_path, mask)
+            exam.mask_path = mask_path
+        
+        exam.status = "Concluído"
         db.session.commit()
-
-        result = predict(e.imagem_path)
-
-        elapsed = time.perf_counter() - start_time
-
-        e.resultado = result.label
-        e.confianca = float(result.confidence)
-        e.model_name = result.model_name
-        e.model_version = result.model_version
-        e.processed_at = datetime.utcnow()
-        e.processing_time = elapsed
-        e.status = "COMPLETED"
-        e.error_message = None
-
+    
+    except Exception as e:
+        exam.status = "Erro"
+        exam.error_message = str(e)
         db.session.commit()
-
-    except Exception as ex:
-        elapsed = time.perf_counter() - start_time
-        try:
-            e.status = "FAILED"
-            e.error_message = str(ex)
-            e.processing_time = elapsed
-            db.session.commit()
-        except SQLAlchemyError:
-            db.session.rollback()
-        raise
