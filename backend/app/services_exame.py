@@ -1,28 +1,39 @@
-from app.ai.classification.predict_classification import predict_classification
-from app.ai.segmentation.transunet.predict_segmentation import predict_segmentation
-import cv2
+import time
+from datetime import datetime
 
-def process_exam_sync(exam):
+from app import db
+from app.models import Exame
+from app.ai.classification.predict_classification import predict_classification
+
+
+def process_exam_sync(exam_id: str):
+    exam = Exame.query.get(exam_id)
+
+    if not exam:
+        return
+
+    start_time = time.time()
+
     try:
-        # Classificação
-        class_id, confidence = predict_classification(exam.imagem_path)
-        
-        # Salvar resultado da classificação
-        exam.resultado = "com endometriose" if class_id == 0 else "sem endometriose"
-        exam.confianca = confidence
-        
-        # Se for "com endometriose", aplicar segmentação
-        if class_id == 0:
-            mask = predict_segmentation(exam.imagem_path)
-            # Aqui você pode salvar a máscara gerada, por exemplo, em /uploads/masks/
-            mask_path = f"uploads/masks/{exam.id}_mask.png"
-            cv2.imwrite(mask_path, mask)
-            exam.mask_path = mask_path
-        
-        exam.status = "Concluído"
+        exam.status = "PROCESSING"
+        exam.error_message = None
         db.session.commit()
-    
-    except Exception as e:
-        exam.status = "Erro"
-        exam.error_message = str(e)
+
+        class_id, label, confidence = predict_classification(exam.imagem_path)
+
+        exam.resultado = label
+        exam.confianca = float(confidence)
+        exam.status = "COMPLETED"
+        exam.model_name = "ConvNeXtTiny"
+        exam.model_version = "keras_v1"
+        exam.processed_at = datetime.utcnow()
+        exam.processing_time = round(time.time() - start_time, 4)
+        exam.error_message = None
+
+        db.session.commit()
+
+    except Exception as error:
+        exam.status = "FAILED"
+        exam.error_message = str(error)
+        exam.processing_time = round(time.time() - start_time, 4)
         db.session.commit()

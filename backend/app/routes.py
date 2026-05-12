@@ -52,7 +52,8 @@ def listar_pacientes():
                 {
                     "examId": e.id,
                     "data": (e.created_at.strftime("%d/%m/%Y") if e.created_at else "—"),
-                    "status": status_label(getattr(e, "status", None)),
+                    "status": getattr(e, "status", None),
+"statusLabel": status_label(getattr(e, "status", None)),
                 }
                 for e in p.exames
             ]
@@ -119,7 +120,8 @@ def listar_exames(paciente_id):
             "processing_time": getattr(e, "processing_time", None),
             "error_message": getattr(e, "error_message", None),
             "data": (e.created_at.strftime("%d/%m/%Y") if e.created_at else "—"),
-            "status": status_label(getattr(e, "status", None)),
+            "status": getattr(e, "status", None),
+            "statusLabel": status_label(getattr(e, "status", None)),
         })
 
     return jsonify(exams)
