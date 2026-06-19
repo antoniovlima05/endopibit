@@ -1,51 +1,81 @@
-import json
 from pathlib import Path
 
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.preprocessing import image
+import torch
+import timm
+from PIL import Image
+from torchvision import transforms
 
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "modelo_endometriose_convnext.keras"
-CLASS_NAMES_PATH = BASE_DIR / "class_names.json"
+MODEL_PATH = BASE_DIR / "best_swin_endo.pth"
+
+MODEL_NAME = "swin_tiny_patch4_window7_224.ms_in1k"
+IMAGE_SIZE = 224
+NUM_CLASSES = 2
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 classification_model = None
+
+transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=3),
+    transforms.Resize(256),
+    transforms.CenterCrop(IMAGE_SIZE),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+    ),
+])
 
 
 def load_classification_model():
     global classification_model
 
     if classification_model is None:
-        classification_model = tf.keras.models.load_model(
-            MODEL_PATH,
-            compile=False
+        model = timm.create_model(
+            MODEL_NAME,
+            pretrained=False,
+            num_classes=NUM_CLASSES,
         )
+
+        state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+        model.load_state_dict(state_dict)
+
+        model.to(DEVICE)
+        model.eval()
+
+        classification_model = model
 
     return classification_model
 
 
-def load_class_names():
-    if CLASS_NAMES_PATH.exists():
-        with open(CLASS_NAMES_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    return ["sem endometriose", "com endometriose"]
-
-
 def predict_classification(image_path: str):
     model = load_classification_model()
-    class_names = load_class_names()
 
-    img = image.load_img(image_path, target_size=(224, 224))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
+    img = Image.open(image_path).convert("RGB")
+    tensor = transform(img).unsqueeze(0).to(DEVICE)
 
-    probability = float(model.predict(img_array, verbose=0)[0][0])
+    with torch.no_grad():
+        outputs = model(tensor)
+        probs = torch.softmax(outputs, dim=1)[0]
 
-    class_id = 1 if probability >= 0.5 else 0
-    confidence = probability if class_id == 1 else 1 - probability
+    pred_idx = int(torch.argmax(probs).item())
+    confidence = float(probs[pred_idx].item())
 
-    label = class_names[class_id]
+    # Modelo novo:
+    # 0 = endometriose
+    # 1 = saudavel
+    #
+    # Backend antigo:
+    # 0 = sem endometriose
+    # 1 = com endometriose
+
+    if pred_idx == 0:
+        class_id = 1
+        label = "com endometriose"
+    else:
+        class_id = 0
+        label = "sem endometriose"
 
     return class_id, label, confidence

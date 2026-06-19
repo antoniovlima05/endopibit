@@ -24,8 +24,8 @@ def process_exam_sync(exam_id: str):
         exam.resultado = label
         exam.confianca = float(confidence)
         exam.status = "COMPLETED"
-        exam.model_name = "ConvNeXtTiny"
-        exam.model_version = "keras_v1"
+        exam.model_name = "SwinTiny"
+        exam.model_version = "pytorch_v1"
         exam.processed_at = datetime.utcnow()
         exam.processing_time = round(time.time() - start_time, 4)
         exam.error_message = None

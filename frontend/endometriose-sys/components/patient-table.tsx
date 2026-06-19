@@ -258,23 +258,12 @@ export default function PatientTable({ onViewPrediction, showPatientNames, setSh
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => startUploadForPatient(patient.id)}
-                        disabled={uploadingFor === patient.id}
+                        onClick={() => onViewPrediction(patient.id)}
                         className="gap-2"
-                        title="Enviar exame e analisar"
                       >
-                        {uploadingFor === patient.id ? (
-                          <>
-                            <Upload className="h-4 w-4 animate-pulse" />
-                            Enviando...
-                          </>
-                        ) : (
-                          <>
-                            <FileSearch className="h-4 w-4" />
-                            Analisar
-                          </>
-                        )}
-                      </Button>
+                        <FileSearch className="h-4 w-4" />
+                        Analisar
+                    </Button>
 
                       <Button
                         variant="ghost"

@@ -13,83 +13,180 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Upload, X } from "lucide-react"
 
 interface NewPatientModalProps {
   isOpen: boolean
   onClose: () => void
+  onPatientCreated?: () => void
 }
 
-export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProps) {
+export default function NewPatientModal({
+  isOpen,
+  onClose,
+  onPatientCreated,
+}: NewPatientModalProps) {
+  const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+
   const [nome, setNome] = useState("")
   const [id, setId] = useState("")
   const [idade, setIdade] = useState("")
   const [sexo, setSexo] = useState("")
-  const [uploadedImages, setUploadedImages] = useState<string[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [uploadedPreviews, setUploadedPreviews] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  const resetForm = () => {
+    uploadedPreviews.forEach((url) => URL.revokeObjectURL(url))
+
+    setNome("")
+    setId("")
+    setIdade("")
+    setSexo("")
+    setUploadedFiles([])
+    setUploadedPreviews([])
+    setIsSubmitting(false)
+  }
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files) {
-      const newImages = Array.from(files).map((file) => URL.createObjectURL(file))
-      setUploadedImages((prev) => [...prev, ...newImages])
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ""
+
+    if (files.length === 0) return
+
+    const validFiles = files.filter((file) => {
+      const name = file.name.toLowerCase()
+      return (
+        name.endsWith(".png") ||
+        name.endsWith(".jpg") ||
+        name.endsWith(".jpeg") ||
+        name.endsWith(".webp")
+      )
+    })
+
+    if (validFiles.length !== files.length) {
+      alert("Alguns arquivos foram ignorados. Use apenas PNG, JPG, JPEG ou WEBP.")
     }
+
+    const previews = validFiles.map((file) => URL.createObjectURL(file))
+
+    setUploadedFiles((prev) => [...prev, ...validFiles])
+    setUploadedPreviews((prev) => [...prev, ...previews])
   }
 
   const removeImage = (index: number) => {
-    setUploadedImages((prev) => prev.filter((_, i) => i !== index))
+    URL.revokeObjectURL(uploadedPreviews[index])
+
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index))
+    setUploadedPreviews((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const sexoToSexoId = (value: string) => {
+    if (value === "feminino") return 1
+    if (value === "masculino") return 2
+    if (value === "outro") return 3
+    return null
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (uploadedImages.length === 0) {
-      alert("Adicione pelo menos uma imagem médica.")
+    if (!id.trim()) {
+      alert("Informe o ID do paciente.")
+      return
+    }
+
+    if (!nome.trim()) {
+      alert("Informe o nome do paciente.")
       return
     }
 
     setIsSubmitting(true)
 
-    // TODO: Aqui você pode integrar com o backend no futuro
-    // Exemplo: enviar nome, id, idade, sexo + imagens
+    try {
+      const createPatientResponse = await fetch(`${API}/api/pacientes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: id.trim(),
+          nome: nome.trim(),
+          idade: idade ? Number(idade) : null,
+          sexo_id: sexoToSexoId(sexo),
+          usuario_id: null,
+        }),
+      })
 
-    setTimeout(() => {
-      setIsSubmitting(false)
+      const createPatientPayload = await createPatientResponse
+        .json()
+        .catch(() => ({}))
+
+      if (!createPatientResponse.ok) {
+        throw new Error(
+          createPatientPayload?.erro ??
+            createPatientPayload?.error ??
+            `Falha ao salvar paciente (${createPatientResponse.status})`
+        )
+      }
+
+      for (const file of uploadedFiles) {
+        const formData = new FormData()
+        formData.append("paciente_id", id.trim())
+        formData.append("file", file)
+
+        const uploadResponse = await fetch(`${API}/api/exames/upload`, {
+          method: "POST",
+          body: formData,
+        })
+
+        const uploadPayload = await uploadResponse.json().catch(() => ({}))
+
+        if (!uploadResponse.ok) {
+          throw new Error(
+            uploadPayload?.erro ??
+              uploadPayload?.error ??
+              `Paciente criado, mas falhou o upload de um exame (${uploadResponse.status})`
+          )
+        }
+      }
+
+      onPatientCreated?.()
       onClose()
-
-      // Resetar formulário
-      setNome("")
-      setId("")
-      setIdade("")
-      setSexo("")
-      setUploadedImages([])
-    }, 800)
+      resetForm()
+    } catch (err: any) {
+      alert(err?.message ?? "Erro ao salvar paciente")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
-  // Limpar ao fechar o modal
   const handleClose = () => {
+    if (isSubmitting) return
+
     onClose()
-    setNome("")
-    setId("")
-    setIdade("")
-    setSexo("")
-    setUploadedImages([])
+    resetForm()
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl">Novo Paciente</DialogTitle>
           <DialogDescription>
-            Adicione as informações do paciente e faça upload das imagens médicas
+            Adicione as informações do paciente e faça upload das imagens médicas.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4 py-2">
-            {/* Nome e ID */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="nome">Nome completo</Label>
@@ -99,8 +196,10 @@ export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProp
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
                   required
+                  disabled={isSubmitting}
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="id">ID do Paciente</Label>
                 <Input
@@ -109,11 +208,11 @@ export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProp
                   value={id}
                   onChange={(e) => setId(e.target.value)}
                   required
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
 
-            {/* Idade e Sexo */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="idade">Idade</Label>
@@ -123,12 +222,17 @@ export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProp
                   placeholder="Ex: 42"
                   value={idade}
                   onChange={(e) => setIdade(e.target.value)}
-                  required
+                  disabled={isSubmitting}
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sexo">Sexo</Label>
-                <Select value={sexo} onValueChange={setSexo} required>
+                <Select
+                  value={sexo}
+                  onValueChange={setSexo}
+                  disabled={isSubmitting}
+                >
                   <SelectTrigger id="sexo">
                     <SelectValue placeholder="Selecione o sexo" />
                   </SelectTrigger>
@@ -141,41 +245,51 @@ export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProp
               </div>
             </div>
 
-            {/* Upload de imagens */}
             <div className="space-y-3">
               <Label>Imagens médicas</Label>
+
               <div className="border-2 border-dashed border-border rounded-xl p-10 text-center hover:border-primary transition-all hover:bg-muted/50">
                 <input
                   type="file"
                   id="file-upload"
                   className="hidden"
-                  accept=".png,.jpg,.jpeg,.dicom"
+                  accept=".png,.jpg,.jpeg,.webp"
                   multiple
                   onChange={handleFileUpload}
+                  disabled={isSubmitting}
                 />
+
                 <label htmlFor="file-upload" className="cursor-pointer block">
                   <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="font-medium text-sm mb-1">Clique ou arraste as imagens aqui</p>
+
+                  <p className="font-medium text-sm mb-1">
+                    Clique ou arraste as imagens aqui
+                  </p>
+
                   <p className="text-xs text-muted-foreground">
-                    PNG, JPG, JPEG, DICOM • Máximo 10MB por arquivo
+                    PNG, JPG, JPEG, WEBP • Máximo 10MB por arquivo
                   </p>
                 </label>
               </div>
 
-              {/* Preview das imagens */}
-              {uploadedImages.length > 0 && (
+              {uploadedPreviews.length > 0 && (
                 <div className="grid grid-cols-4 gap-4 mt-6">
-                  {uploadedImages.map((image, index) => (
-                    <div key={index} className="relative group rounded-lg overflow-hidden border">
+                  {uploadedPreviews.map((image, index) => (
+                    <div
+                      key={`${image}-${index}`}
+                      className="relative group rounded-lg overflow-hidden border"
+                    >
                       <img
                         src={image}
                         alt={`Imagem ${index + 1}`}
                         className="w-full h-28 object-cover"
                       />
+
                       <button
                         type="button"
                         onClick={() => removeImage(index)}
                         className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 shadow-md opacity-0 group-hover:opacity-100 transition-all hover:bg-destructive/90"
+                        disabled={isSubmitting}
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -187,13 +301,16 @@ export default function NewPatientModal({ isOpen, onClose }: NewPatientModalProp
           </div>
 
           <DialogFooter className="gap-3">
-            <Button type="button" variant="outline" onClick={handleClose}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClose}
+              disabled={isSubmitting}
+            >
               Cancelar
             </Button>
-            <Button 
-              type="submit" 
-              disabled={uploadedImages.length === 0 || isSubmitting}
-            >
+
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? "Salvando..." : "Salvar Paciente"}
             </Button>
           </DialogFooter>
