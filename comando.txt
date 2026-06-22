@@ -1,0 +1,9 @@
+back:cd C:\Users\apvli\OneDrive\Documentos\portifolio-antonio\endometriose-sys
+.\backend\venv\Scripts\Activate.ps1
+cd backend
+$env:FLASK_APP="app"
+python -m flask run --host=127.0.0.1 --port=5000
+front: cd C:\Users\apvli\OneDrive\Documentos\portifolio-antonio\endometriose-sys\frontend\endometriose-sys
+npm run dev
+docker: cd C:\Users\apvli\OneDrive\Documentos\portifolio-antonio\endometriose-sys
+docker compose up -d
