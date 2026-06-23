@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   db:
     image: postgres:16
@@ -23,6 +21,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://endosys:endosys@db:5432/endosys
       FLASK_APP: app
+      FLASK_RUN_HOST: 0.0.0.0
+      FLASK_RUN_PORT: 5000
     volumes:
       - ./backend/uploads:/app/uploads
     depends_on:
